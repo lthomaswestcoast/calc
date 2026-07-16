@@ -304,20 +304,20 @@ body{
     <div class="k sm" data-a="mat-oc">On-Center</div>
     <div class="k sm" data-a="mat-tile">Tile</div>
     <div class="k sm" data-a="mat-paint">Paint</div>
-    <div class="k sm" data-a="mat-rebar">Rebar</div>
     <div class="k sm" data-a="mat-bdft">Board Ft<span class="sub">2·4·14</span></div>
-
-    <div class="k sm" data-a="mat-setcost">Set Qty</div>
-    <div class="k sm" data-a="mat-cost">Cost</div>
-    <div class="k sm" data-a="mat-wtvol">Wt/Vol</div>
-    <div class="k sm" data-a="mat-weight">Weight</div>
     <div class="k sm" data-a="mat-dims">Show Dims</div>
+
+    <div class="k sm" data-a="mat-wtvol">Set Wt/Vol</div>
+    <div class="k sm" data-a="mat-weight">Weight</div>
+    <div class="k sm" data-a="mat-topsoil">Topsoil</div>
+    <div class="k sm" data-a="mat-gravel">Gravel</div>
+    <div class="k sm xs" data-a="clr-bdft">Clr BdFt</div>
 
     <div class="k sm xs" data-a="mat-blksize">Set Blk</div>
     <div class="k sm xs" data-a="mat-brksize">Set Brk</div>
     <div class="k sm xs" data-a="mat-ftgsize">Set Ftg</div>
-    <div class="k sm xs" data-a="mat-topsoil">Topsoil</div>
-    <div class="k sm xs" data-a="mat-gravel">Gravel</div>
+    <div class="k sm xs" data-a="mr">MR</div>
+    <div class="k sm xs" data-a="recall">Store</div>
   </div>
 
   <!-- ============ ROOF ============ -->
@@ -538,7 +538,6 @@ const regs = {'1':null,'2':null,'3':null};   // M1-M3 storage registers
 let fresh = true;      // next digit starts new entry
 let shift = false;
 let tapeLines = [];
-let costPend = null;   // quantity awaiting a unit cost
 let pitchCycle = null; // which pitch format is displayed
 let bdSeq = [];        // board-foot nominal entry sequence
 
@@ -651,7 +650,6 @@ function fmt(val){
     case 'lb':  return num(val.v,2)+' lb';
     case 'gal': return num(val.v,2)+' gal';
     case 'ea':  return num(val.v,0)+' ea';
-    case 'cost':return '$'+val.v.toFixed(2);
     case 'tonne':return num(val.v,3)+' t';
     case 'bdft':return num(val.v,2)+' bd ft';
     case 'dms': return dmsStr(val.v);
@@ -885,6 +883,8 @@ function eq(){
 function setDim(k,label){
   const v=cur();
   if(v.u!=='in'&&v.u!=='num'){err('NEEDS LENGTH');return;}
+  if(v.v<0){err('MUST BE > 0');return;}
+  if(v.v===0){err('MUST BE > 0');return;}
   D[k]=V(v.v,'in');
   show(D[k], label+' =');
 }
@@ -933,26 +933,6 @@ const MAT={
     tape('WALL  '+fmt(V(wall,'in2')));
     tape('CEIL  '+fmt(V(ceil,'in2')));
     show(V(wall+ceil,'in2'),'ROOM AREA');},
-  'mat-cost':()=>{
-    if(costPend===null){err('ENTER QTY, THEN COST');return;}
-    const v=cur();
-    if(v.u!=='num'){err('COST = PLAIN NO.');return;}
-    const q=costPend; costPend=null;
-    let qty, lbl;
-    if(q.u==='in3'&&P.vol==='m3'){qty=q.v/(IN_M**3);lbl='m³';}
-    else if(q.u==='in3'&&P.vol==='yd3'){qty=q.v/46656;lbl='yd³';}
-    else if(q.u==='in3'){qty=q.v/1728;lbl='ft³';}
-    else if(q.u==='in2'&&P.area==='m2'){qty=q.v/(IN_M*IN_M);lbl='m²';}
-    else if(q.u==='in2'){qty=q.v/144;lbl='ft²';}
-    else if(q.u==='in'){qty=q.v/12;lbl='ft';}
-    else {qty=q.v;lbl='ea';}
-    tape('QTY   '+num(qty,3)+' '+lbl);
-    tape('RATE  $'+num(v.v,2)+' / '+lbl);
-    show(V(qty*v.v,'cost'),'TOTAL COST');},
-  'mat-setcost':()=>{const v=cur();
-    if(v.u==='num'){err('SET QTY FIRST');return;}
-    costPend=v; tape('QTY SET  '+fmt(v));
-    E=null;fresh=true;render();},
   'mat-wtvol':()=>{const v=cur();
     if(v.u!=='num'){err('PLAIN NO.');return;}
     P.wtVol=v.v; savePrefs();
@@ -1069,13 +1049,6 @@ const MAT={
     tape('PAINT area '+num(a/144,1)+' ft²');
     tape('@ '+P.paintCov+' ft²/gal');
     show(V(a/144/P.paintCov,'gal'),'PAINT 1 coat');},
-  'mat-rebar':()=>{if(!needDims('len','wid'))return;
-    const nL=Math.ceil(D.wid.v/P.oc)+1, nW=Math.ceil(D.len.v/P.oc)+1;
-    tape('BARS  '+nL+' × L  +  '+nW+' × W');
-    show(V(nL*D.len.v+nW*D.wid.v,'in'),'REBAR total');},
-  'mat-boardft':()=>{if(!needDims('len','wid'))return;
-    const t=D.dep||D.hgt; if(!t){err('SET DEPTH');return;}
-    show(V(D.len.v*D.wid.v*t.v/144,'num'),'BOARD FT');},
   'mat-waste':()=>{const v=cur();show(V(v.v*(1+P.waste/100),v.u),'+'+P.waste+'% WASTE');},
   'mat-bags':()=>{const v=cur(); if(v.u!=='in3'){err('NEEDS VOLUME');return;}
     const cf=v.v/1728;
@@ -1132,6 +1105,16 @@ function stairSolve(limited){
   const rOver = totRise - nRis*rnd(riserHt);
   const tOver = nTrd>0 ? nTrd*rnd(treadW) - totRun : 0;
 
+  if(nTrd<1){
+    // one riser and no treads: a step, not a staircase
+    tape('── STAIRS ──');
+    tape('R-HT  '+fmtIn(riserHt));
+    tape('RSRS  '+nRis);
+    tape('⚠ SINGLE STEP — NO TREADS');
+    show(V(riserHt,'in'),'RISER HT');
+    return;
+  }
+
   // Stringer spans the treads: the top riser lands on the upper floor, so the
   // diagonal covers nTrd risers, not nRis.
   const stringer = Math.hypot(riserHt*nTrd, totRun);
@@ -1185,6 +1168,7 @@ const TRI={
       else if(v.u==='pct'){  riseP12=v.v/100*12; startAt=2; }   // percent grade
       else if(v.u==='num'){  riseP12=Math.tan(v.v*Math.PI/180)*12; startAt=1; } // degrees
       else {err('BAD PITCH');return;}
+      if(riseP12<0){err('PITCH MUST BE >= 0');return;}
       D.pitch=V(riseP12,'pitch');
       pitchCycle=startAt;
       showPitch(startAt);
@@ -1226,6 +1210,7 @@ const TRI={
     else if(v.u==='pct') r=v.v/100*12;
     else if(v.u==='num') r=Math.tan(v.v*Math.PI/180)*12;
     else {err('BAD PITCH');return;}
+    if(r<=0){err('PITCH MUST BE > 0');return;}
     D.irpitch=V(r,'pitch'); show(D.irpitch,'IRREG PITCH');},
 
   'tri-hip':()=>{
@@ -1391,9 +1376,11 @@ const TRI={
 const CIRC={
   'circ-dia':()=>{const v=cur();
     if(v.u!=='in'){err('NEEDS LENGTH');return;}
+    if(v.v<=0){err('MUST BE > 0');return;}
     D.dia=V(v.v,'in');D.rad=V(v.v/2,'in');show(D.dia,'DIA');},
   'circ-rad':()=>{const v=cur();
     if(v.u!=='in'){err('NEEDS LENGTH');return;}
+    if(v.v<=0){err('MUST BE > 0');return;}
     D.rad=V(v.v,'in');D.dia=V(v.v*2,'in');show(D.rad,'RAD');},
   'circ-sides':()=>{const v=cur();
     if(v.u!=='num'){err('SIDES = PLAIN NO.');return;}
@@ -1435,9 +1422,11 @@ const CIRC={
   // ---- arc solver: enter any two of {dia/rad, arc, chord, seg rise} ----
   'circ-chordset':()=>{const v=cur();
     if(v.u!=='in'){err('NEEDS LENGTH');return;}
+    if(v.v<=0){err('MUST BE > 0');return;}
     D.chord=V(v.v,'in');show(D.chord,'CHORD');},
   'circ-segrise':()=>{const v=cur();
     if(v.u!=='in'){err('NEEDS LENGTH');return;}
+    if(v.v<=0){err('MUST BE > 0');return;}
     D.segrise=V(v.v,'in');show(D.segrise,'SEG RISE');},
   'circ-arcset':()=>{const v=cur();
     if(v.u==='in'){D.arcLen=V(v.v,'in');D.arcDeg=null;show(D.arcLen,'ARC LEN');return;}
@@ -1453,7 +1442,8 @@ const CIRC={
 
     // chord + rise -> radius   (R = (c/2)^2 + h^2) / 2h )
     if(c!==null && h!==null && R===null){
-      if(h<=0){err('RISE > 0');return;}
+      if(h<=0){err('RISE MUST BE > 0');return;}
+      if(c<=0){err('CHORD MUST BE > 0');return;}
       R = ((c/2)*(c/2) + h*h) / (2*h);
     }
     // radius + chord -> rise
@@ -1648,7 +1638,7 @@ function press(a){
     case 'add':case 'sub':case 'mul':case 'div': return op(a);
     case 'eq': return eq();
     case 'onoff': acc=V(0,'num');E=null;pend=null;last=null;fresh=true;tapeLines=[];
-      bdSeq=[];costPend=null;pitchCycle=null;render();return;
+      bdSeq=[];pitchCycle=null;render();return;
     case 'ce': E=null;fresh=true;render();return;
     case 'bksp':
       if(E){
@@ -1763,8 +1753,8 @@ const HELP=[
  ['How many bags of concrete?',
   'Get a volume on the display, then press <b>Bags</b>. The tape shows both 25 kg and 30 kg bag counts.'],
  ['How do I convert a volume to tonnes or truck loads?',
-  'Store your material density once with <b>Wt/Vol</b>, then press <b>Weight</b> with a volume displayed. The tape gives lb, ton, kg and tonnes at once.',
-  "1 . 5 <i>Wt/Vol</i>    <i>(1.5 ton/yd³)</i>\n<i>...volume on display...</i>\n<i>Weight</i>",
+  'Store your material density once with <b>Set Wt/Vol</b>, then press <b>Weight</b> with a volume displayed. The tape gives lb, ton, kg and tonnes at once.',
+  "1 . 5 <i>Set Wt/Vol</i>    <i>(1.5 ton/yd³)</i>\n<i>...volume on display...</i>\n<i>Weight</i>",
   'Change the density units in Prefs (ton/yd³, lb/ft³, t/m³, kg/m³).'],
  ['How do I add a waste percentage to anything?',
   'Get any value on the display and press <b>+Waste%</b>. Uses the Prefs percentage.'],
@@ -1779,8 +1769,6 @@ const HELP=[
  ['How do I space things evenly across a run?',
   'Enter the total length and press <b>On-Center</b>. It gives the actual spacing once the run is divided into whole spaces at or under your Prefs o.c.',
   "1 2 <i>Feet</i> <i>On-Center</i>\n→ tape shows number of spaces\n→ display shows actual o.c."],
- ['How much rebar?',
-  'Set <b>Length</b> and <b>Width</b>, press <b>Rebar</b>. Uses Prefs o.c. for the grid; the tape shows bar counts each way and the display gives total linear length.'],
  ['How do I get board feet?',
   'Two ways. From a volume, just press <b>Board Ft</b>. Or enter nominal sizes: press <b>Board Ft</b> after each of the three numbers.',
   "2 <i>Board Ft</i> 4 <i>Board Ft</i> 1 4 <i>Board Ft</i>\n→ 2\" × 4\" × 14' = 9.333 bd ft"],
@@ -1859,11 +1847,7 @@ const HELP=[
  ['How do I get tank or pipe capacity?',
   'Set <b>Diameter</b> and <b>Height</b> (or Length for pipe), press <b>Tank Vol</b> or <b>Pipe Vol</b>. Answer comes out in gallons; the tape has the volume too.'],
 ]],
-['Cost & conversion',[
- ['How do I price a takeoff?',
-  'Get the quantity on the display, press <b>Set Qty</b>, then type the unit rate and press <b>Cost</b>.',
-  "<i>...20.766 m³ on display...</i>\n<i>Set Qty</i>\n2 4 0 <i>Cost</i>  → $4983.84",
-  'It prices per m³, ft³, yd³, m², ft², ft or each — whatever the quantity is.'],
+['Conversion',[
  ['How do I convert between units?',
   'Get a value on the display, go to the <b>Conv</b> tab, press the target unit. That\'s it.',
   "9 5 <i>Inch</i> 5 <i>/</i> 8\n<i>Conv</i> → <i>→ Feet</i>  → 7.96875"],
